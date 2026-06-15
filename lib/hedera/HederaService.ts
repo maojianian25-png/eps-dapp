@@ -74,7 +74,18 @@ export async function mintProofNFT(payload: {
   const { TokenMintTransaction, TokenId } = await import('@hashgraph/sdk');
   const client = await buildClient();
   if (!client) return null;
-  const metadata = new TextEncoder().encode(JSON.stringify({ eps: 'v1', ...payload, mintedAt: new Date().toISOString() }));
+  // Hedera HTS caps NFT metadata at 100 bytes — a full JSON blob overflows it
+  // and the mint receipt comes back METADATA_TOO_LONG. Per the HTS / wallet
+  // convention the on-chain metadata is a URI pointing to a JSON document;
+  // HashScan fetches it to render the certificate image + attributes.
+  // The URL is ~62 bytes, comfortably under the cap, and a hard truncation
+  // guard keeps us safe even if topic/seq grow (issue #158).
+  const hcsTopic = process.env.HEDERA_HCS_TOPIC_ID ?? '0.0.9225885';
+  const metaUri = `https://eps-dapp.vercel.app/api/nft/meta?topic=${hcsTopic}&caseRef=${encodeURIComponent(payload.caseRef)}`;
+  let metadata = Buffer.from(metaUri, 'utf8');
+  if (metadata.length > 100) {
+    metadata = metadata.subarray(0, 100);
+  }
   try {
     const response = await new TokenMintTransaction()
       .setTokenId(TokenId.fromString(tokenId)).addMetadata(metadata).execute(client);
